@@ -1,5 +1,6 @@
 import { MODULE_BY_KEY } from '@/data/modules'
-import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import { allRows, commit, listRows, resetRows } from '@/data/local-store'
+import { firewatchOverview, resetFirewatch } from '@/api/firewatch-service'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
@@ -52,12 +53,16 @@ export function runAction(key: string, id: number, action: string): ActionResult
   }
   const next = [...rows]
   next[index] = updated
-  saveRows(key, next)
+  commit({ [key]: next })
   return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」` }
 }
 
 export function resetModule(key: string): PageResult {
-  resetRows(key)
+  if (key === 'firewatch') {
+    resetFirewatch()
+  } else {
+    resetRows(key)
+  }
   return listEntries(key)
 }
 
@@ -86,8 +91,18 @@ export function downloadEntries(key: string): void {
 
 export function loadOverview(): OverviewResult {
   const rows = allRows()
+  const firewatchStats = firewatchOverview()
   const modules = [...MODULE_BY_KEY.values()].map((meta) => {
-    const entries = rows[meta.key] ?? []
+    const entries = Array.isArray(rows[meta.key]) ? (rows[meta.key] as EntryRow[]) : []
+    if (meta.key === 'firewatch') {
+      // 火险口径以领域服务为准：异常面板按监测点去重，解除后旧等级不残留。
+      return {
+        name: meta.name,
+        created: entries.length,
+        pending: firewatchStats.pendingCount,
+        abnormal: firewatchStats.abnormalCount,
+      }
+    }
     return {
       name: meta.name,
       created: entries.length,

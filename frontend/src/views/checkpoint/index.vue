@@ -18,6 +18,47 @@
       </article>
     </div>
 
+    <section class="panel">
+      <header class="panel-head">
+        <h3>火险提醒</h3>
+        <span class="panel-sub">与监测点同一份等级，一个监测点只提醒一次；监测侧解除后此处同次消失，请逐点复核确认</span>
+      </header>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>监测点编号</th>
+            <th>监测区域</th>
+            <th>预警等级</th>
+            <th>监测时刻</th>
+            <th>复核状态</th>
+            <th>可执行动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in reminders" :key="String(item.monitorId)">
+            <td>{{ item.monitorCode }}</td>
+            <td>{{ item.area }}</td>
+            <td>{{ item.level }}</td>
+            <td>{{ item.warnedAt }}</td>
+            <td>{{ item.acknowledged ? '已复核' : '待复核' }}</td>
+            <td class="row-actions">
+              <button
+                class="link"
+                type="button"
+                :disabled="item.acknowledged"
+                @click="confirmReminder(item.monitorId)"
+              >
+                复核确认
+              </button>
+            </td>
+          </tr>
+          <tr v-if="!reminders.length">
+            <td colspan="6" class="empty-state">当前没有需要检查站关注的火险提醒</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <p class="status-legend">
       <span v-for="item in statusSummary" :key="item.status" class="legend-item">
         {{ item.status }}：{{ item.count }}
@@ -79,15 +120,19 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import {
+  acknowledgeReminder,
+  remindersForView,
+} from '@/api/firewatch-service'
+import type { EntryRow, FirewatchReminder } from '@/data/types'
 
 const meta = moduleMeta('checkpoint')
 const columns = ["站点编号", "站点位置", "值守人员", "检查项目", "通行车辆数", "收缴火种数", "值班日期", "运行状态"]
 const actions = ["升级检查", "关闭站点", "安排换岗"]
 const statuses = ["正常检查", "临时关闭", "升级检查", "等待换岗"]
-const stats = [{"label": "站点总数", "value": 0}, {"label": "正常检查数", "value": 0}, {"label": "收缴火种数", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
+const reminders = ref<FirewatchReminder[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
@@ -98,6 +143,11 @@ const statusSummary = computed(() =>
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+const stats = computed(() => [
+  { label: "站点总数", value: total.value },
+  { label: "待复核火险提醒", value: reminders.value.filter((item) => !item.acknowledged).length },
+  { label: "生效中预警点位", value: reminders.value.length },
+])
 
 function resetFilters() {
   filters.value = {}
@@ -122,16 +172,27 @@ function runAction(action: string, row: EntryRow) {
   reload()
 }
 
+function confirmReminder(monitorId: number) {
+  errorMessage.value = ''
+  const result = acknowledgeReminder(monitorId)
+  if (!result.ok) {
+    errorMessage.value = result.message
+  }
+  reload()
+}
+
 function reload() {
   errorMessage.value = ''
   try {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    reminders.value = remindersForView()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '防火检查站列表读取失败'
   }
 }
 
+// 每次进入页面都重新读取：从别处复核/解除后返回列表，再次进入看到的一定是最新同口径数据。
 onMounted(reload)
 </script>
